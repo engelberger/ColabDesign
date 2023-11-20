@@ -557,81 +557,166 @@ class mk_mpnn_model_dual():
     self._inputs = {}
     self._tied_lengths = False
 
-    # ... Additional initialization code ...
+    # TODO : Finishe the init method
 
   def _setup_dual_backbone(self):
     # Define private methods for dual backbone sampling and scoring
     # These methods will be similar to those in mk_mpnn_model but will
     # use the dual backbone functionalities from RunModelDual and DualProteinMPNN
 
-    def _score_dual_backbone(self, I1, I2, key):
+    def _score_dual_backbone(X1, 
+                             X2, 
+                             mask1, 
+                             mask2, 
+                             residue_idx1, 
+                             residue_idx2, 
+                             chain_idx1, 
+                             chain_idx2, 
+                             key, 
+                             **kwargs):
       """
-      Scores a pair of sequences against two different protein backbones simultaneously using the Dual Backbone MPNN model.
+            Scores a pair of sequences against two different protein backbones simultaneously using the Dual Backbone MPNN model.
       
       This method takes two sets of input features corresponding to two different protein backbones and computes the score
       for a sequence against both backbones. The method relies on the DualProteinMPNN model's ability to handle dual backbone
       inputs and produce a combined score.
-      
-      Args:
-          I1 (dict): Input features for the first protein backbone. Expected keys in the dictionary include 'X', 'mask',
-                    'residue_idx', 'chain_idx', and any other required features by the model.
-          I2 (dict): Input features for the second protein backbone. Expected keys in the dictionary include 'X', 'mask',
-                    'residue_idx', 'chain_idx', and any other required features by the model.
-          key (jax.random.PRNGKey): A JAX PRNG key used for random number generation within the model.
-      
-      Returns:
-          dict: A dictionary containing the combined logits for the dual backbones and any additional output from the model.
       """
-      # Prepare the combined input dictionary for the dual backbone model.
       I_combined = {
-          'I1': I1,
-          'I2': I2
+        'X1': X1,
+        'X2': X2,
+        'mask1': mask1,
+        'mask2': mask2,
+        'residue_idx1': residue_idx1,
+        'residue_idx2': residue_idx2,
+        'chain_idx1': chain_idx1,
+        'chain_idx2': chain_idx2
       }
+      I_combined.update(kwargs)
+      # Define decoding order
+      if "decoding_order" not in I_combined:
+        key, sub_key = jax.random.split(key)
+        randn = jax.random.uniform(sub_key, (I_combined["X1"].shape[0],))    
+        randn = jnp.where(I_combined["mask1"], randn, randn+1)
+        if "fix_pos" in I_combined: 
+          randn = jnp.where(I_combined["fix_pos"],randn-1,randn)
+        I_combined["decoding_order"] = randn.argsort()
       
-      # Call the scoring function of the dual backbone model with the combined inputs.
+      for k in ["S","bias"]:
+        if k in I_combined: I_combined[k] = _aa_convert(I_combined[k])
+      
       O = self._model.score(self._model_params, key, I_combined)
-      
-      # The output O is expected to contain the combined logits and any additional information
-      # provided by the DualProteinMPNN model after scoring the dual backbones.
-      
+      O["S"] = _aa_convert(O["S"], rev=True)
+      O["logits"] = _aa_convert(O["logits"], rev=True)
+            
       return O
 
-    def _sample_dual_backbone(self, inputs1, inputs2, key, temperature=0.1):
-      """
-      Sample sequences that satisfy two different protein backbones simultaneously.
 
-      Args:
-        inputs1 (dict): A dictionary containing the input features for the first protein backbone.
-        inputs2 (dict): A dictionary containing the input features for the second protein backbone.
-        key (jax.random.PRNGKey): A key for random number generation.
-        temperature (float): The temperature parameter controlling the randomness of sampling.
-
-      Returns:
-        dict: A dictionary containing the sampled sequences and associated data for the dual backbones.
+    def _sample_dual_backbone(X1, 
+                              X2, 
+                              mask1, 
+                              mask2, 
+                              residue_idx1, 
+                              residue_idx2, 
+                              chain_idx1, 
+                              chain_idx2, 
+                              key,
+                              temperature=0.1, 
+                              tied_lengths=False, 
+                              **kwargs):
       """
-      # Merge input features for both backbones
-      I_dual = {
-        'I1': inputs1,
-        'I2': inputs2,
+            Samples a pair of sequences against two different protein backbones simultaneously using the Dual Backbone MPNN model.
+      
+      This method takes two sets of input features corresponding to two different protein backbones and samples a sequence against
+      both backbones. The method relies on the DualProteinMPNN model's ability to handle dual backbone inputs and produce a combined
+      sample.
+      """
+      I_combined = {
+        'X1': X1,
+        'X2': X2,
+        'mask1': mask1,
+        'mask2': mask2,
+        'residue_idx1': residue_idx1,
+        'residue_idx2': residue_idx2,
+        'chain_idx1': chain_idx1,
+        'chain_idx2': chain_idx2,
         'temperature': temperature
       }
+      I_combined.update(kwargs)
+      # Define decoding order
+      if "decoding_order" in I_combined:
+        if I_combined["decoding_order"].ndim == 1:
+          I_combined["decoding_order"] = I_combined["decoding_order"][:,None]
+      else:
+        key, sub_key = jax.random.split(key)
+        randn = jax.random.uniform(sub_key, (I_combined["X1"].shape[0],))    
+        randn = jnp.where(I_combined["mask1"], randn, randn+1)
+        if "fix_pos" in I_combined:
+          randn = jnp.where(I_combined["fix_pos"],randn-1,randn)
+        if tied_lengths:
+          copies = I_combined["lengths"].shape[0]
+          decoding_order_tied = randn.reshape(copies,-1).mean(0).argsort()
+          I_combined["decoding_order"] = jnp.arange(I_combined["X1"].shape[0]).reshape(copies,-1).T[decoding_order_tied]
+        else:
+          I_combined["decoding_order"] = randn.argsort()[:,None]
 
-      # Call the dual backbone sampling function
-      O_dual = self._model.sample_dual(self._model_params, key, I_dual)
-
-      # TODO: Process the sampling outputs as needed
+      for k in ["S","bias"]:
+        if k in I_combined: I_combined[k] = _aa_convert(I_combined[k])
       
-
-      return O_dual
-
-    # Compile the dual backbone functions using JAX's JIT for faster execution
+      O = self._model.sample(self._model_params, key, I_combined)
+      O["S"] = _aa_convert(O["S"], rev=True)
+      O["logits"] = _aa_convert(O["logits"], rev=True)
+      return O
+    
     self._score_dual_backbone = jax.jit(_score_dual_backbone)
-    self._sample_dual_backbone = jax.jit(_sample_dual_backbone)
-
-    # TODO: Additional setup for dual backbone methods
-
-# TODO: Additional methods for mk_mpnn_model_dual 
-
+    self._sample_dual_backbone = jax.jit(_sample_dual_backbone, static_argnames=["tied_lengths"])
+    
+    def _sample_parallel_dual_backbone(key, inputs, temperature, tied_lengths=False):
+      """
+            Helper function to sample new sequences in parallel using the Dual Backbone MPNN model.
+            
+            Args:
+                key: A key for random number generation.
+                inputs: A dictionary containing the input features.
+                temperature: Sampling temperature.
+                tied_lengths: Whether the lengths of sequences are tied (for homooligomers).
+                
+            Returns:
+                A dictionary containing the sampled sequences and logits.
+      """
+      inputs.pop("temperature",None)
+      inputs.pop("key",None)
+      return _sample_dual_backbone(**inputs, key=key, temperature=temperature, tied_lengths=tied_lengths)
+    # Vectorize the _sample_parallel function to enable parallel execution.
+    fn = jax.vmap(_sample_parallel_dual_backbone, in_axes=[0, None, None, None])
+    # Compile the vectorized _sample_parallel function using JAX's JIT for faster execution.
+    self._sample_parallel_dual_backbone = jax.jit(fn, static_argnames=["tied_lengths"])
+    
+      
+    def _rescore_parallel_dual_backbone(key, inputs, S, decoding_order):
+      """
+            Helper function to rescore sequences in parallel using the Dual Backbone MPNN model.
+            
+            Args:
+                key: A key for random number generation.
+                inputs: A dictionary containing the input features.
+                S: One-hot encoded sequences tensor.
+                decoding_order: Tensor representing the order in which positions were decoded.
+                
+            Returns:
+                A dictionary containing the rescored logits and sequences.
+      """
+      inputs.pop("S",None)
+      inputs.pop("decoding_order",None)
+      inputs.pop("key",None)
+      return _score_dual_backbone(**inputs, key=key, S=S, decoding_order=decoding_order)
+    # Vectorize the _rescore_parallel function to enable parallel execution.
+    fn = jax.vmap(_rescore_parallel_dual_backbone, in_axes=[0, None, 0, 0])
+    # Compile the vectorized _rescore_parallel function using JAX's JIT for faster execution.
+    self._rescore_parallel_dual_backbone = jax.jit(fn)
+      
+                              
+                              
+                              
   def set_seed(self, seed: Optional[int] = None):
     # Set the random seed for reproducibility
     np.random.seed(seed=seed)

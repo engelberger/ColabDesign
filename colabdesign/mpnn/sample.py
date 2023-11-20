@@ -151,58 +151,6 @@ class mpnn_sample:
   
 ################ Dual attempt ################
 class mpnn_sample_dual_backbone(mpnn_sample):
-    def combine_embeddings(self, h_V1, h_E1, h_V2, h_E2, method='average'):
-        """
-        Combine the node and edge embeddings from two backbones using the specified method.
-        
-        Args:
-        h_V1, h_E1: Node and edge embeddings from the first backbone.
-        h_V2, h_E2: Node and edge embeddings from the second backbone.
-        method (str): The method to use for combining embeddings. Options are 'concatenate', 'average',
-                      'learned', 'weighted', or 'dimensionality_reduction'.
-        
-        Returns:
-        Combined node and edge embeddings.
-        """
-        if method == 'concatenate':
-            return self.concatenate_embeddings(h_V1, h_E1, h_V2, h_E2)
-        elif method == 'average':
-            return self.average_embeddings(h_V1, h_E1, h_V2, h_E2)
-        elif method == 'learned':
-            return self.learned_combination(h_V1, h_E1, h_V2, h_E2)
-        elif method == 'weighted':
-            return self.weighted_combination(h_V1, h_E1, h_V2, h_E2)
-        elif method == 'dimensionality_reduction':
-            return self.dimensionality_reduction(h_V1, h_E1, h_V2, h_E2)
-        else:
-            raise ValueError(f"Unknown combination method: {method}")
-
-    def concatenate_embeddings(self, h_V1, h_E1, h_V2, h_E2):
-        # Concatenate embeddings along the feature dimension
-        h_V_combined = jnp.concatenate([h_V1, h_V2], axis=-1)
-        h_E_combined = jnp.concatenate([h_E1, h_E2], axis=-1)
-        return h_V_combined, h_E_combined
-
-    def average_embeddings(self, h_V1, h_E1, h_V2, h_E2):
-        # Compute the element-wise average of the embeddings
-        h_V_combined = (h_V1 + h_V2) / 2
-        h_E_combined = (h_E1 + h_E2) / 2
-        return h_V_combined, h_E_combined
-
-    def learned_combination(self, h_V1, h_E1, h_V2, h_E2):
-        # Use a learned neural network layer to combine the embeddings
-        # This requires defining and training a suitable combination layer
-        raise NotImplementedError("Learned combination method is not implemented.")
-
-    def weighted_combination(self, h_V1, h_E1, h_V2, h_E2):
-        # Use weighted sum to combine the embeddings
-        # Weights can be predefined or learned as part of the model
-        raise NotImplementedError("Weighted combination method is not implemented.")
-
-    def dimensionality_reduction(self, h_V1, h_E1, h_V2, h_E2):
-        # Apply dimensionality reduction to combined embeddings
-        # This can involve a linear layer or other techniques like PCA
-        raise NotImplementedError("Dimensionality reduction method is not implemented.")
     
     def sample_dual(self, I1: Dict[str, Any], I2: Dict[str, Any], combination_method='concatenate') -> Dict[str, jnp.ndarray]:
 
@@ -338,4 +286,59 @@ class mpnn_sample_dual_backbone(mpnn_sample):
 
         # Return the sampled sequences, logits, and decoding order
         return {"S": X["S"], "logits": X["logits"], "decoding_order": t}
+
+
+    def combine_embeddings(self, h_V1, h_E1, h_V2, h_E2, method='average'):
+        """
+        Combine the node and edge embeddings from two backbones using the specified method.
+        
+        Args:
+        h_V1, h_E1: Node and edge embeddings from the first backbone.
+        h_V2, h_E2: Node and edge embeddings from the second backbone.
+        method (str): The method to use for combining embeddings. Options are 'concatenate', 'average',
+                      'learned', 'weighted', or 'dimensionality_reduction'.
+        
+        Returns:
+        Combined node and edge embeddings.
+        """
+        if method == 'concatenate':
+            return self.concatenate_embeddings(h_V1, h_E1, h_V2, h_E2)
+        elif method == 'average':
+            return self.average_embeddings(h_V1, h_E1, h_V2, h_E2)
+        elif method == 'learned':
+            return self.learned_combination(h_V1, h_E1, h_V2, h_E2)
+        elif method == 'weighted':
+            return self.weighted_combination(h_V1, h_E1, h_V2, h_E2)
+        elif method == 'dimensionality_reduction':
+            return self.dimensionality_reduction(h_V1, h_E1, h_V2, h_E2)
+        else:
+            raise ValueError(f"Unknown combination method: {method}")
+
+    def concatenate_embeddings(self, h_V1, h_E1, h_V2, h_E2):
+        # Concatenate embeddings along the feature dimension
+        h_V_combined = jnp.concatenate([h_V1, h_V2], axis=-1)
+        h_E_combined = jnp.concatenate([h_E1, h_E2], axis=-1)
+        return h_V_combined, h_E_combined
+
+    def average_embeddings(self, h_V1, h_E1, h_V2, h_E2):
+        # Compute the element-wise average of the embeddings
+        h_V_combined = (h_V1 + h_V2) / 2
+        h_E_combined = (h_E1 + h_E2) / 2
+        return h_V_combined, h_E_combined
+
+    def learned_combination(self, h_V1, h_E1, h_V2, h_E2):
+        # Use a learned neural network layer to combine the embeddings
+        # This requires defining and training a suitable combination layer
+        raise NotImplementedError("Learned combination method is not implemented.")
+
+    def weighted_combination(self, h_V1, h_E1, h_V2, h_E2):
+        # Use weighted sum to combine the embeddings
+        # Weights can be predefined or learned as part of the model
+        raise NotImplementedError("Weighted combination method is not implemented.")
+
+    def dimensionality_reduction(self, h_V1, h_E1, h_V2, h_E2):
+        # Apply dimensionality reduction to combined embeddings
+        # This can involve a linear layer or other techniques like PCA
+        raise NotImplementedError("Dimensionality reduction method is not implemented.")
+    
 
