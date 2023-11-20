@@ -557,7 +557,234 @@ class mk_mpnn_model_dual():
     self._inputs = {}
     self._tied_lengths = False
 
-    # TODO : Finishe the init method
+    # TODO : Finish the init method
+
+  def prep_inputs(self, pdb_filename: Optional[str] = None, chain: Optional[str] = None,
+                    homooligomer: bool = False, ignore_missing: bool = True,
+                    fix_pos: Optional[Union[List[int], str]] = None, inverse: bool = False,
+                    rm_aa: Optional[str] = None, verbose: bool = False, **kwargs) -> None:
+    """
+        Prepares input features from a PDB file for the MPNN model.
+        
+    """
+    pdb = prep_pdb(pdb_filename, chain, ignore_missing=ignore_missing)
+    atom_idx = tuple(residue_constants.atom_order[k] for k in ["N","CA","C","O"])
+    chain_idx = np.concatenate([[n]*l for n,l in enumerate(pdb["lengths"])])
+    self._lengths = pdb["lengths"]
+    L = sum(self._lengths)
+    
+    self._inputs = {"X1":           pdb["batch"]["all_atom_positions"][:,atom_idx],
+                    "X2":           pdb["batch"]["all_atom_positions"][:,atom_idx],
+                    "mask1":        pdb["batch"]["all_atom_mask"][:,1],
+                    "mask2":        pdb["batch"]["all_atom_mask"][:,1],
+                    "residue_idx1": pdb["residue_index"],
+                    "residue_idx2": pdb["residue_index"],
+                    "chain_idx1":   chain_idx,
+                    "chain_idx2":   chain_idx,
+                    "lengths":      np.array(self._lengths),
+                    "bias":         np.zeros((L,20))}
+    
+    if rm_aa is not None:
+      for aa in rm_aa.split(","):
+        self._inputs["bias"][...,aa_order[aa]] -= 1e6
+        
+    if fix_pos is not None:
+      p = prep_pos(fix_pos, **pdb["idx"])["pos"]
+      if inverse:
+        p = np.delete(np.arange(L),p)
+      self._inputs["fix_pos"] = np.full(L,False)
+      self._inputs["fix_pos"][p] = True
+      self._inputs["bias"][p] = 1e7 * np.eye(21)[self._inputs["S"]][p,:20]
+  
+    if homooligomer:
+      assert min(self._lengths) == max(self._lengths)
+      self._tied_lengths = True
+      self._len = self._lengths[0]
+    else:
+      self._tied_lengths = False    
+      self._len = sum(self._lengths)
+      
+    self.pdb = pdb
+    
+    if verbose:
+      print("lengths", self._lengths)
+      if "fix_pos" in self._inputs:
+        print("the following positions will be fixed:")
+        print(np.where(self._inputs["fix_pos"])[0])
+    
+  def get_af_inputs(self, af: protein.Protein) -> None:
+    """
+        Retrieves input features from an AlphaFold model.
+        
+        Args:
+            af (AlphaFoldModel): An AlphaFold model object.
+    """
+    self._lengths = af._lengths
+    self._len = af._len
+
+    self._inputs["residue_idx1"] = af._inputs["residue_index"]
+    self._inputs["residue_idx2"] = af._inputs["residue_index"]
+    self._inputs["chain_idx1"]   = af._inputs["asym_id"]
+    self._inputs["chain_idx2"]   = af._inputs["asym_id"]
+    self._inputs["lengths"]      = np.array(self._lengths)
+
+    # set bias
+    L = sum(self._lengths)
+    self._inputs["bias"] = np.zeros((L,20))
+    self._inputs["bias"][-af._len:] = af._inputs["bias"]
+    
+    if "offset" in af._inputs:
+      self._inputs["offset"] = af._inputs["offset"]
+
+    if "batch" in af._inputs:
+      atom_idx = tuple(residue_constants.atom_order[k] for k in ["N","CA","C","O"])
+      batch = af._inputs["batch"]
+      self._inputs["X1"]    = batch["all_atom_positions"][:,atom_idx]
+      self._inputs["X2"]    = batch["all_atom_positions"][:,atom_idx]
+      self._inputs["mask1"] = batch["all_atom_mask"][:,1]
+      self._inputs["mask2"] = batch["all_atom_mask"][:,1]
+
+    # fix positions
+    if af.protocol == "binder":
+      fix_pos = np.array([True]*self._target_len + [False] * self._binder_len)
+    else:
+      fix_pos = af._inputs["fix_pos"]
+    
+    self._inputs["fix_pos"] = fix_pos
+    self._inputs["bias"][fix_pos] = 1e7 * np.eye(21)[self._inputs["S"]][fix_pos,:20]
+
+    # tie positions
+    if af._args["copies"] > 1:
+      assert min(self._lengths) == max(self._lengths)
+      self._tied_lengths = True
+    else:
+      self._tied_lengths = False
+      
+  def sample(self, num: int = 1, batch: int = 1, temperature: float = 0.1,
+              rescore: bool = False, **kwargs) -> Dict[str, Any]:
+    """
+        Samples sequences from the MPNN model.
+    """
+    O = []
+    for _ in range(num):
+      O.append(self.sample_parallel(batch, temperature, rescore, **kwargs))
+    return jax.tree_map(lambda *x:np.concatenate(x,0),*O)
+
+  def sample_parallel(self, batch: int = 10, temperature: float = 0.1,
+                        rescore: bool = False, **kwargs) -> Dict[str, Any]:
+    """
+    Sample new sequences in parallel.
+    """
+    I = copy_dict(self._inputs)
+    I.update(kwargs)
+    key = I.pop("key",self.key())
+    keys = jax.random.split(key,batch)
+    O = self._sample_parallel(keys, I, temperature, self._tied_lengths)
+    if rescore:
+      O = self._rescore_parallel(keys, I, O["S"], O["decoding_order"])
+    O = jax.tree_map(np.array, O)
+
+    # process outputs to human-readable form
+    O.update(self._get_seq(O))
+    O.update(self._get_score(I,O))
+    return O
+  
+  def _get_seq(self, O: Dict[str, jnp.ndarray]) -> Dict[str, np.ndarray]:
+    """
+    Convert one-hot encoded sequence to amino acid sequence.
+    """
+    def split_seq(seq):
+      if len(self._lengths) > 1:
+        seq = "".join(np.insert(list(seq),np.cumsum(self._lengths[:-1]),"/"))
+        if self._tied_lengths:
+          seq = seq.split("/")[0]
+      return seq
+    seqs, S = [], O["S"].argmax(-1)
+    if S.ndim == 1: S = [S]
+    for s in S:
+      seq = "".join([order_aa[a] for a in s])
+      seq = split_seq(seq)
+      seqs.append(seq)
+    
+    return {"seq": np.array(seqs)}
+  
+  def _get_score(self, I: Dict[str, jnp.ndarray], O: Dict[str, jnp.ndarray]) -> Dict[str, np.ndarray]:
+    """
+    Compute the logits to score and sequence recovery.
+    """
+    mask = I["mask"].copy()
+    if "fix_pos" in I:
+      mask[I["fix_pos"]] = 0
+
+    log_q = log_softmax(O["logits"],-1)[...,:20]
+    q = softmax(O["logits"][...,:20],-1)
+    if "S" in O:
+      S = O["S"][...,:20]
+      score = -(S * log_q).sum(-1)
+      seqid = S.argmax(-1) == self._inputs["S"]
+    else:
+      score = -(q * log_q).sum(-1)
+      seqid = np.zeros_like(score)
+      
+    score = (score * mask).sum(-1) / (mask.sum() + 1e-8)
+    seqid = (seqid * mask).sum(-1) / (mask.sum() + 1e-8)
+
+    return {"score":score, "seqid":seqid}
+  
+  def score(self, seq: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+    """Score a sequence
+
+    Args:
+        seq (Optional[str], optional): _description_. Defaults to None.
+
+    Returns:
+        Dict[str, Any]: _description_
+    """
+    I = copy_dict(self._inputs)
+    if seq is not None:
+      if self._tied_lengths and len(seq) == self._lengths[0]:
+        seq = seq * len(self._lengths)
+      p = np.arange(I["S"].shape[0])
+      if "fix_pos" in I and len(seq) == (I["S"].shape[0] - sum(I["fix_pos"])):
+        p = p[I["fix_pos"]]
+      I["S"][p] = np.array([aa_order.get(aa, -1) for aa in seq])
+      
+    I.update(kwargs)
+    key = I.pop("key", self.key())
+    O = jax.tree_map(np.array, self._score(**I, key=key))
+    O.update(self._get_score(I, O))
+    return O
+  
+  def get_logits(self, **kwargs) -> jnp.ndarray:
+    """Get logits
+
+    Args:
+        **kwargs: _description_
+
+    Returns:
+        jnp.ndarray: _description_
+    """
+    return self.score(**kwargs)["logits"]
+  
+  def get_unconditional_logits(self, **kwargs) -> jnp.ndarray:
+    """Get unconditional logits
+
+    Args:
+        **kwargs: _description_
+
+    Returns:
+        jnp.ndarray: _description_
+    """
+    L = self._inputs["X1"].shape[0]
+    kwargs["ar_mask"] = np.zeros((L, L))
+    return self.score(**kwargs)["logits"]
+  
+    
+
+  def set_seed(self, seed: Optional[int] = None):
+    # Set the random seed for reproducibility
+    np.random.seed(seed=seed)
+    self.key = Key(seed=seed).get
 
   def _setup_dual_backbone(self):
     # Define private methods for dual backbone sampling and scoring
@@ -717,12 +944,8 @@ class mk_mpnn_model_dual():
                               
                               
                               
-  def set_seed(self, seed: Optional[int] = None):
-    # Set the random seed for reproducibility
-    np.random.seed(seed=seed)
-    self.key = Key(seed=seed).get
 
-  # ... Additional methods for sampling, scoring, input preparation, etc. ...
+
 #######################################################################################
 
 def _aa_convert(x, rev=False):
