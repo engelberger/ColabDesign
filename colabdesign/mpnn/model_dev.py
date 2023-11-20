@@ -11,6 +11,7 @@ from typing import Optional, Union, List, Dict, Any
 
 from .weights import __file__ as mpnn_path
 from .modules import RunModel
+from .modules_dev import RunModelDual
 
 from colabdesign.shared.prep import prep_pos
 from colabdesign.shared.utils import Key, copy_dict
@@ -526,8 +527,117 @@ class mk_mpnn_model():
     # Compile the vectorized _rescore_parallel function using JAX's JIT for faster execution.
     self._rescore_parallel = jax.jit(fn)
 #######################################################################################
+class mk_mpnn_model_dual():
+  def __init__(self, model_name: str = "v_48_020",
+               backbone_noise: float = 0.0, dropout: float = 0.0,
+               seed: Optional[int] = None, verbose: bool = False):
+    # Configure model for dual backbone
+    path = os.path.join(os.path.dirname(mpnn_path), f'{model_name}.pkl')    
+    checkpoint = joblib.load(path)
+    config = {'num_letters': 21,
+              'node_features': 128,
+              'edge_features': 128,
+              'hidden_dim': 128,
+              'num_encoder_layers': 3,
+              'num_decoder_layers': 3,
+              'augment_eps': backbone_noise,
+              'k_neighbors': checkpoint['num_edges'],
+              'dropout': dropout}
+    
+    self._model = RunModelDual(config)
+    
+    # Load model params
+    self._model_params = jax.tree_map(jnp.array, checkpoint['model_state_dict'])
+    
+    # Initialize other attributes
+    self._setup_dual_backbone()
+    self.set_seed(seed)
 
+    self._num = 1
+    self._inputs = {}
+    self._tied_lengths = False
 
+    # ... Additional initialization code ...
+
+  def _setup_dual_backbone(self):
+    # Define private methods for dual backbone sampling and scoring
+    # These methods will be similar to those in mk_mpnn_model but will
+    # use the dual backbone functionalities from RunModelDual and DualProteinMPNN
+
+    def _score_dual_backbone(self, I1, I2, key):
+      """
+      Scores a pair of sequences against two different protein backbones simultaneously using the Dual Backbone MPNN model.
+      
+      This method takes two sets of input features corresponding to two different protein backbones and computes the score
+      for a sequence against both backbones. The method relies on the DualProteinMPNN model's ability to handle dual backbone
+      inputs and produce a combined score.
+      
+      Args:
+          I1 (dict): Input features for the first protein backbone. Expected keys in the dictionary include 'X', 'mask',
+                    'residue_idx', 'chain_idx', and any other required features by the model.
+          I2 (dict): Input features for the second protein backbone. Expected keys in the dictionary include 'X', 'mask',
+                    'residue_idx', 'chain_idx', and any other required features by the model.
+          key (jax.random.PRNGKey): A JAX PRNG key used for random number generation within the model.
+      
+      Returns:
+          dict: A dictionary containing the combined logits for the dual backbones and any additional output from the model.
+      """
+      # Prepare the combined input dictionary for the dual backbone model.
+      I_combined = {
+          'I1': I1,
+          'I2': I2
+      }
+      
+      # Call the scoring function of the dual backbone model with the combined inputs.
+      O = self._model.score(self._model_params, key, I_combined)
+      
+      # The output O is expected to contain the combined logits and any additional information
+      # provided by the DualProteinMPNN model after scoring the dual backbones.
+      
+      return O
+
+    def _sample_dual_backbone(self, inputs1, inputs2, key, temperature=0.1):
+      """
+      Sample sequences that satisfy two different protein backbones simultaneously.
+
+      Args:
+        inputs1 (dict): A dictionary containing the input features for the first protein backbone.
+        inputs2 (dict): A dictionary containing the input features for the second protein backbone.
+        key (jax.random.PRNGKey): A key for random number generation.
+        temperature (float): The temperature parameter controlling the randomness of sampling.
+
+      Returns:
+        dict: A dictionary containing the sampled sequences and associated data for the dual backbones.
+      """
+      # Merge input features for both backbones
+      I_dual = {
+        'I1': inputs1,
+        'I2': inputs2,
+        'temperature': temperature
+      }
+
+      # Call the dual backbone sampling function
+      O_dual = self._model.sample_dual(self._model_params, key, I_dual)
+
+      # TODO: Process the sampling outputs as needed
+      
+
+      return O_dual
+
+    # Compile the dual backbone functions using JAX's JIT for faster execution
+    self._score_dual_backbone = jax.jit(_score_dual_backbone)
+    self._sample_dual_backbone = jax.jit(_sample_dual_backbone)
+
+    # TODO: Additional setup for dual backbone methods
+
+# TODO: Additional methods for mk_mpnn_model_dual 
+
+  def set_seed(self, seed: Optional[int] = None):
+    # Set the random seed for reproducibility
+    np.random.seed(seed=seed)
+    self.key = Key(seed=seed).get
+
+  # ... Additional methods for sampling, scoring, input preparation, etc. ...
 #######################################################################################
 
 def _aa_convert(x, rev=False):
