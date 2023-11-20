@@ -151,7 +151,7 @@ class mpnn_sample:
   
 ################ Dual attempt ################
 class mpnn_sample_dual_backbone(mpnn_sample):
-    def combine_embeddings(self, h_V1, h_E1, h_V2, h_E2, method='concatenate'):
+    def combine_embeddings(self, h_V1, h_E1, h_V2, h_E2, method='average'):
         """
         Combine the node and edge embeddings from two backbones using the specified method.
         
@@ -203,8 +203,6 @@ class mpnn_sample_dual_backbone(mpnn_sample):
         # Apply dimensionality reduction to combined embeddings
         # This can involve a linear layer or other techniques like PCA
         raise NotImplementedError("Dimensionality reduction method is not implemented.")
-
-
     
     def sample_dual(self, I1: Dict[str, Any], I2: Dict[str, Any], combination_method='concatenate') -> Dict[str, jnp.ndarray]:
 
