@@ -1,0 +1,56 @@
+FROM nvidia/cuda:11.1.1-runtime-ubuntu18.04
+
+# Set up environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV IMG_NAME=11.2.2-cudnn8-devel-ubuntu20.04 JAXLIB_VERSION=0.3.8
+
+
+# Update and install required packages
+RUN apt-get update && apt-get install -y --no-install-recommends     wget ca-certificates git build-essential curl aria2 python3-pip unzip
+ 
+# Install Miniconda
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && bash /tmp/miniconda.sh -b -p /opt/conda && rm /tmp/miniconda.sh
+
+# Add conda to PATH
+ENV PATH=/opt/conda/bin:${PATH}
+
+# Create conda environment and install dependencies
+#COPY env/SE3nv.yml /tmp/SE3nv.yml
+
+
+
+RUN git clone https://github.com/RosettaCommons/RFdiffusion.git
+RUN conda env create -f /RFdiffusion/env/SE3nv.yml 
+# Activate conda environment
+RUN echo "source activate SE3nv" > ~/.bashrc
+ENV PATH /opt/conda/envs/SE3nv/bin:$PATH
+
+RUN cd RFdiffusion/env/SE3Transformer && pip install --no-cache-dir -r requirements.txt && python setup.py install
+
+RUN cd RFdiffusion && pip install -e .
+
+
+RUN apt update && apt install git python3-pip -y
+
+RUN pip install numpy scipy six wheel -f https://storage.googleapis.com/jax-releases/jax_releases.html
+
+RUN pip -q install git+https://github.com/sokrypton/ColabDesign.git
+
+RUN pip install -q "jax[cuda]>=0.3.8,<0.4" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+RUN pip -q install git+https://github.com/sokrypton/ColabDesign.git@v1.1.0
+WORKDIR /colabdesign
+# alphafold params
+RUN mkdir params
+RUN curl -fsSL https://storage.googleapis.com/alphafold/alphafold_params_2022-03-02.tar | tar x -C params
+
+RUN wget -qnc https://zhanggroup.org/TM-score/TMscore.cpp
+RUN g++ -static -O3 -ffast-math -lm -o TMscore TMscore.cpp
+
+
+RUN mkdir /code-server/
+WORKDIR /code-server/
+RUN wget -O- https://aka.ms/install-vscode-server/setup.sh > setup.sh
+RUN chmod +x setup.sh
+RUN ./setup.sh 
+RUN pip -q install ipykernel notebook plotly kaleido
+WORKDIR /home

@@ -1,0 +1,66 @@
+Bootstrap: docker
+From: nvidia/cuda:11.1.1-runtime-ubuntu18.04
+Stage: spython-base
+
+%post
+
+# Set up environment variables
+DEBIAN_FRONTEND=noninteractive
+IMG_NAME=11.2.2-cudnn8-devel-ubuntu20.04
+JAXLIB_VERSION=0.3.8
+
+
+# Update and install required packages
+apt-get update && apt-get install -y --no-install-recommends     wget ca-certificates git build-essential curl aria2 python3-pip unzip
+ 
+# Install Miniconda
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && bash /tmp/miniconda.sh -b -p /opt/conda && rm /tmp/miniconda.sh
+
+# Add conda to PATH
+PATH=/opt/conda/bin:${PATH}
+
+# Create conda environment and install dependencies
+#COPY env/SE3nv.yml /tmp/SE3nv.yml
+
+
+
+git clone https://github.com/RosettaCommons/RFdiffusion.git
+conda env create -f /RFdiffusion/env/SE3nv.yml
+# Activate conda environment
+echo "source activate SE3nv" > ~/.bashrc
+PATH=/opt/conda/envs/SE3nv/bin:$PATH
+
+cd RFdiffusion/env/SE3Transformer && /opt/conda/envs/SE3nv/bin/python -m pip install --no-cache-dir -r requirements.txt && /opt/conda/envs/SE3nv/bin/python setup.py install
+
+cd /RFdiffusion && /opt/conda/envs/SE3nv/bin/python -m pip install -e .
+
+
+
+/opt/conda/envs/SE3nv/bin/python -m pip install numpy scipy six wheel -f https://storage.googleapis.com/jax-releases/jax_releases.html
+
+/opt/conda/envs/SE3nv/bin/python -m pip -q install git+https://github.com/sokrypton/ColabDesign.git
+
+
+
+# alphafold params
+#mkdir /params && cd /params 
+#curl -fsSL https://storage.googleapis.com/alphafold/alphafold_params_2022-03-02.tar | tar x -C /params
+
+wget -qnc https://zhanggroup.org/TM-score/TMscore.cpp
+g++ -static -O3 -ffast-math -lm -o TMscore TMscore.cpp
+
+
+/opt/conda/envs/SE3nv/bin/python -m pip -q install ipykernel notebook plotly kaleido ipywidgets 
+cd /home
+%environment
+export DEBIAN_FRONTEND=noninteractive
+export IMG_NAME=11.2.2-cudnn8-devel-ubuntu20.04
+export JAXLIB_VERSION=0.3.8
+export PATH=/opt/conda/bin:${PATH}
+export PATH=/opt/conda/envs/SE3nv/bin:$PATH
+#%runscript
+#cd /home
+#exec /bin/bash "$@"
+#%startscript
+#cd /home
+#exec /bin/bash "$@"

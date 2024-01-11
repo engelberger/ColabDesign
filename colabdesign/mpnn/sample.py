@@ -287,7 +287,6 @@ class mpnn_sample_dual_backbone(mpnn_sample):
         # Return the sampled sequences, logits, and decoding order
         return {"S": X["S"], "logits": X["logits"], "decoding_order": t}
 
-
     def combine_embeddings(self, h_V1, h_E1, h_V2, h_E2, method='average'):
         """
         Combine the node and edge embeddings from two backbones using the specified method.
