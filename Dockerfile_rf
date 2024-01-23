@@ -1,0 +1,46 @@
+FROM us-docker.pkg.dev/colab-images/public/runtime
+RUN /usr/bin/python3.10 -m pip -q install git+https://github.com/sokrypton/ColabDesign.git@gamma
+RUN apt-get install aria2
+
+# Set working directory
+WORKDIR /app
+
+# Install necessary packages
+RUN apt-get update && \
+    apt-get install -y aria2 && \
+    apt-get clean
+
+# Create params directory and download parameters
+RUN mkdir -p params && \
+    (aria2c -q -x 16 https://files.ipd.uw.edu/krypton/schedules.zip && \
+     aria2c -q -x 16 http://files.ipd.uw.edu/pub/RFdiffusion/6f5902ac237024bdd0c176cb93063dc4/Base_ckpt.pt && \
+     aria2c -q -x 16 http://files.ipd.uw.edu/pub/RFdiffusion/e29311f6f1bf1af907f9ef9f44b8328b/Complex_base_ckpt.pt && \
+     aria2c -q -x 16 http://files.ipd.uw.edu/pub/RFdiffusion/f572d396fae9206628714fb2ce00f72e/Complex_beta_ckpt.pt && \
+     aria2c -q -x 16 https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar && \
+     tar -xf alphafold_params_2022-12-06.tar -C params && \
+     touch params/done.txt)
+
+# Clone RFdiffusion repository and install dependencies
+RUN git clone --branch max https://github.com/engelberger/RFdiffusion.git && \
+    /usr/bin/python3.10 -m pip install -q jedi omegaconf hydra-core icecream pyrsistent && \
+    /usr/bin/python3.10 -m pip install dgl -f https://data.dgl.ai/wheels/cu121/repo.html && \
+    cd RFdiffusion/env/SE3Transformer && \
+    /usr/bin/python3.10 -m pip install --no-cache-dir -r requirements.txt && \
+    /usr/bin/python3.10 -m pip install . && \
+    cd /app && \
+    wget -qnc https://files.ipd.uw.edu/krypton/ananas && \
+    chmod +x ananas
+
+# Install ColabDesign
+RUN /usr/bin/python3.10 -m pip install git+https://github.com/sokrypton/ColabDesign.git && \
+    ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign
+
+# Create RFdiffusion models directory and move models into it
+RUN mkdir -p RFdiffusion/models && \
+    mv Base_ckpt.pt Complex_base_ckpt.pt Complex_beta_ckpt.pt RFdiffusion/models && \
+    unzip schedules.zip && \
+    rm schedules.zip
+
+# Set environment variable and add RFdiffusion to Python path
+ENV DGLBACKEND=pytorch
+ENV PYTHONPATH="${PYTHONPATH}:/app/RFdiffusion"
