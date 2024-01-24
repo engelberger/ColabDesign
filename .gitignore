@@ -1,3 +1,6 @@
 **/.DS_Store
 *.pyc
-rf/examples/outputs
+rf/examples/outputs/
+rf/examples/params
+rf/examples/5KQV.pdb1
+outputs/*

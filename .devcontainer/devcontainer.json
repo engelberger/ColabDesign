@@ -15,7 +15,7 @@
 	},
 	"runArgs": [
 		"--gpus",
-		"all"
+		"all",
 ],
 "customizations": {
 	"vscode": {

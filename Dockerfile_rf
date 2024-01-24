@@ -1,7 +1,6 @@
 FROM us-docker.pkg.dev/colab-images/public/runtime
 RUN /usr/bin/python3.10 -m pip -q install git+https://github.com/sokrypton/ColabDesign.git@gamma
 RUN apt-get install aria2
-
 # Set working directory
 WORKDIR /app
 
@@ -31,10 +30,9 @@ RUN git clone --branch max https://github.com/engelberger/RFdiffusion.git && \
     wget -qnc https://files.ipd.uw.edu/krypton/ananas && \
     chmod +x ananas
 
-# Install ColabDesign
-RUN /usr/bin/python3.10 -m pip install git+https://github.com/sokrypton/ColabDesign.git && \
-    ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign
-
+#RUN /usr/bin/python3.10 -m pip install --upgrade "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+RUN /usr/bin/python3.10 -m pip  install git+https://github.com/sokrypton/ColabDesign.git
+RUN ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign
 # Create RFdiffusion models directory and move models into it
 RUN mkdir -p RFdiffusion/models && \
     mv Base_ckpt.pt Complex_base_ckpt.pt Complex_beta_ckpt.pt RFdiffusion/models && \
