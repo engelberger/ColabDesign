@@ -105,8 +105,9 @@ class mpnn_sample:
     X = hk.scan(lambda x, xs: fwd(x, xs["t"], xs["key"]), X, XS)[0]
     
     return {"S":X["S"], "logits":X["logits"], "decoding_order":t}
-    def tied_sample(self, I):
-    """
+  
+  def tied_sample(self, I):
+  """
     I = {
          [[required]]
          'X' = (L,4,3)  # Input features for L residues, each with 4 features of size 3
