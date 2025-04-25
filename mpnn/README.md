@@ -7,7 +7,7 @@
 
 #### install
 ```bash
-pip -q install git+https://github.com/sokrypton/ColabDesign.git@v1.1.1
+pip -q install git+https://github.com/engelberger/ColabDesign.git@gamma_1_read
 ```
 #### run
 ```python
